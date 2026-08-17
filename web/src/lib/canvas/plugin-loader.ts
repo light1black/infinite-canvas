@@ -5,6 +5,13 @@ import type { CanvasPlugin } from "@/types/canvas-plugin";
 import i18n from "@/i18n";
 
 const cleanups = new Map<string, () => void>();
+const remotePluginInstallEnabled = import.meta.env.VITE_ENABLE_REMOTE_PLUGINS === "true";
+
+function assertPluginSourceAllowed(url: string) {
+    const source = new URL(url, window.location.origin);
+    if (source.origin === window.location.origin || remotePluginInstallEnabled) return;
+    throw new Error("远程插件安装默认关闭。仅在审查来源后设置 VITE_ENABLE_REMOTE_PLUGINS=true。");
+}
 
 // A remote plugin may export CanvasPlugin directly or a factory that receives runtime and returns CanvasPlugin.
 // The factory uses runtime.React so the bundle does not need its own React copy.
@@ -59,6 +66,7 @@ function withCacheBust(url: string) {
 // Install or replace a plugin from a URL and enable it immediately.
 // bustCache bypasses HTTP/CDN caches during upgrades while persisting a clean URL without the timestamp query.
 export async function installPluginFromUrl(url: string, opts?: { official?: boolean; bustCache?: boolean }) {
+    assertPluginSourceAllowed(url);
     const source = await fetchPluginSource(opts?.bustCache ? withCacheBust(url) : url);
     const plugin = await evaluatePluginSource(source);
     deactivatePlugin(plugin.id); // Replace the previous version.
@@ -68,6 +76,7 @@ export async function installPluginFromUrl(url: string, opts?: { official?: bool
 }
 
 export async function updatePlugin(record: InstalledPlugin) {
+    assertPluginSourceAllowed(record.url);
     // Upgrades must fetch the latest output and therefore always bypass caches.
     return installPluginFromUrl(record.url, { official: record.official, bustCache: true });
 }
@@ -79,6 +88,7 @@ export async function setPluginEnabled(record: InstalledPlugin, enabled: boolean
         return;
     }
     // Reload local plugins from their URL when enabled because the cached source may be stale.
+    if (!record.local) assertPluginSourceAllowed(record.url);
     const source = record.local ? await fetchPluginSource(withCacheBust(record.url)) : record.source;
     const plugin = await evaluatePluginSource(source);
     activatePlugin(plugin);
@@ -101,6 +111,7 @@ export async function ensurePluginsLoaded() {
     await Promise.all(
         records.map(async (record) => {
             try {
+                if (!record.local) assertPluginSourceAllowed(record.url);
                 // Local plugins use the latest output; other plugins use their cached source.
                 const source = record.local ? await fetchPluginSource(withCacheBust(record.url)) : record.source;
                 activatePlugin(await evaluatePluginSource(source));
