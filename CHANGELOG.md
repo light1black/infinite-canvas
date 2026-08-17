@@ -3,6 +3,7 @@
 ## Unreleased
 
 + [新增] 提示词来源新增 Freestylefly GPT Image 2 内置来源。
++ [新增] 第三阶段图片任务接入本地 Canvas Agent 的 OpenAI 兼容图片适配器；未配置密钥时保留模拟结果。
 
 ## v0.15.1 - 2026-08-07
 

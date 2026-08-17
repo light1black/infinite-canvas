@@ -8,6 +8,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { requestAgentImageTask } from "./agent-image";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -743,6 +744,18 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
+    if (requestConfig.apiFormat === "openai") {
+        const quality = normalizeQuality(config.quality);
+        const result = await requestAgentImageTask({
+            prompt: withSystemPrompt(requestConfig, prompt),
+            model: requestConfig.model,
+            count: n,
+            size: resolveRequestSize(quality, config.size),
+            quality,
+            background: normalizeBackground(config.background),
+        }, options?.signal);
+        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
+    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
@@ -834,6 +847,22 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
+    }
+
+    if (requestConfig.apiFormat === "openai") {
+        if (mask) throw new Error(apiText("maskModelUnsupported"));
+        const quality = normalizeQuality(config.quality);
+        const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const result = await requestAgentImageTask({
+            prompt: withSystemPrompt(requestConfig, requestPrompt),
+            images,
+            model: requestConfig.model,
+            count: n,
+            size: resolveRequestSize(quality, config.size),
+            quality,
+            background: normalizeBackground(config.background),
+        }, options?.signal);
+        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
     }
 
     const quality = normalizeQuality(config.quality);

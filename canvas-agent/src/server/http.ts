@@ -13,6 +13,7 @@ import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWo
 import { logger } from "../utils/logger.js";
 import { checkVersions } from "../version-check.js";
 import { SkillStore, SkillStoreError } from "../skills/store.js";
+import { runImageTask } from "../generation/image-task.js";
 
 /** 启动仅监听本机的 Canvas Agent HTTP 服务。 */
 export function startHttpServer() {
@@ -135,6 +136,14 @@ export function startHttpServer() {
         if (validToken(req, requestUrl(req, config), config.token)) return next();
         res.status(401).json({ ok: false, error: "invalid token" });
     });
+    app.post("/generation/image/tasks", route(async (req, res) => {
+        const controller = new AbortController();
+        req.on("aborted", () => controller.abort());
+        res.on("close", () => {
+            if (!res.writableEnded) controller.abort();
+        });
+        res.json({ ok: true, data: await runImageTask(req.body || {}, controller.signal) });
+    }));
     app.get("/events", (req, res) => {
         session.openEvents(requestUrl(req, config), res, ensureSiteWorkspace(config).activeThreadId || "");
     });
