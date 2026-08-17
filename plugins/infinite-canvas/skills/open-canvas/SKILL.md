@@ -9,13 +9,13 @@ description: 打开 Infinite Canvas 在线或本地画布，并自动连接本�
 
 ## 在线版
 
-1. 启动本地 Canvas Agent 并保持运行：
+1. 如果 `http://127.0.0.1:17371/health` 已可访问，复用当前本地 Canvas Agent；否则启动固定版本的本地 Agent 并保持运行：
 
 ```bash
 npx -y @basketikun/canvas-agent@0.6.0
 ```
 
-2. 从启动输出取得 `Local URL` 和 `Connect token`。
+2. 从启动输出或本机配置文件 `%USERPROFILE%/.infinite-canvas/canvas-agent.json` 读取 `url` 和 `token`。Token 只用于本机画布 URL，不要在对话中显示。
 
 3. 在 Codex 右侧浏览器打开：
 
@@ -25,21 +25,24 @@ https://canvas.best/canvas?mode=new&agentUrl=<Local URL>&agentToken=<Connect tok
 
 ## 本地版
 
-1. 在 Infinite Canvas 项目中启动前端，并使用 Vite 输出的 `Local` 地址：
+1. 在本地 Fork 的 Infinite Canvas 项目中启动前端，并使用 Vite 输出的 `Local` 地址：
 
 ```bash
 cd web
-bun install
-bun run dev
+npm install --legacy-peer-deps
+npm run dev
 ```
 
-2. 启动本地 Canvas Agent：
+2. 如果 `http://127.0.0.1:17371/health` 已可访问，复用当前本地 Canvas Agent；否则在 Fork 根目录启动本地 Agent：
 
 ```bash
-npx -y @basketikun/canvas-agent@0.6.0
+cd canvas-agent
+npm install
+npm run build
+node dist/index.js
 ```
 
-3. 从启动输出取得 `Local URL` 和 `Connect token`，在 Codex 右侧浏览器打开：
+3. 从启动输出或本机配置文件 `%USERPROFILE%/.infinite-canvas/canvas-agent.json` 读取 `url` 和 `token`。Token 只用于本机画布 URL，不要在对话中显示；然后在 Codex 右侧浏览器打开：
 
 ```text
 <Vite Local 地址>/canvas?mode=new&agentUrl=<Local URL>&agentToken=<Connect token>
@@ -48,7 +51,7 @@ npx -y @basketikun/canvas-agent@0.6.0
 ## MCP 与连接地址
 
 插件在新的 Codex 任务中加载时会自动启动固定版本的 `npx -y @basketikun/canvas-agent@0.6.0 mcp`。这个 MCP 进程负责提供画布工具，不提供网页连接服务；
-上面启动的普通 Canvas Agent 负责提供 `Local URL` 和 `Connect token`。两个进程读取同一份本地配置，因此不需要用户手动填写地址或 token。
+上面启动的普通 Canvas Agent 负责提供 `Local URL` 和 `Connect token`。两个进程读取同一份本地配置，因此不需要用户手动填写地址或 token。若已运行本地 Fork 的 Agent，优先复用它，不要再启动第二个占用同一端口的进程。
 
 ## 打开模式
 
