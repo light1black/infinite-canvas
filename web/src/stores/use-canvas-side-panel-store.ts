@@ -17,6 +17,7 @@ function initialWidth() {
 
 function initialOpen() {
     if (typeof window === "undefined") return true;
+    if (window.innerWidth < 768) return false;
     return localStorage.getItem(OPEN_KEY) !== "0";
 }
 

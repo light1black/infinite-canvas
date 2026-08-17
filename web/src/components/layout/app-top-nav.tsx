@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { useAgentStore } from "@/stores/use-agent-store";
 
+const agentAutoConnectEnabled = import.meta.env.VITE_ENABLE_AGENT_AUTOCONNECT === "true";
+
 export function AppTopNav() {
     const { t } = useTranslation();
     const { pathname } = useLocation();
@@ -27,7 +29,7 @@ export function AppTopNav() {
     const activeToolSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
 
     useEffect(() => {
-        if (autoConnectRef.current || agentEnabled || agentConnected || !agentToken.trim()) return;
+        if (!agentAutoConnectEnabled || autoConnectRef.current || agentEnabled || agentConnected || !agentToken.trim()) return;
         autoConnectRef.current = true;
         connectAgent({ silent: true });
     }, [agentConnected, agentEnabled, agentToken, connectAgent]);

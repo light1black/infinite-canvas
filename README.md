@@ -25,7 +25,7 @@
 无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
 
 > [!NOTE]
-> 当前 Fork 默认关闭跨源远程插件安装，配置导出会移除 AI API Key 和 WebDAV 密码，并将 Codex 插件使用的 Canvas Agent 固定为 `0.6.0`。需要远程插件时，必须在审查来源后显式设置 `VITE_ENABLE_REMOTE_PLUGINS=true`。
+> 当前 Fork 默认关闭跨源远程插件安装和 Canvas Agent 自动连接，配置导出会移除 AI API Key 和 WebDAV 密码，并将 Codex 插件使用的 Canvas Agent 固定为 `0.6.0`。需要远程插件时，必须在审查来源后显式设置 `VITE_ENABLE_REMOTE_PLUGINS=true`；需要自动连接 Agent 时，显式设置 `VITE_ENABLE_AGENT_AUTOCONNECT=true`。
 >
 > Fork 地址：`https://github.com/light1black/infinite-canvas`；上游地址：`https://github.com/basketikun/infinite-canvas`。安全基线位于 `codex/safe-baseline` 分支。当前阶段仅验证网页前端，不启用 MCP、Canvas Agent，也不配置或调用真实图片/视频服务。
 
