@@ -121,7 +121,16 @@ export function startHttpServer() {
         next();
     });
     app.get("/health", (_req, res) => res.json(session.health()));
-    app.get("/config", (_req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url, hasToken: true }));
+    app.get("/config", (req, res) => res.json({
+        ok: true,
+        protocolVersion: AGENT_PROTOCOL_VERSION,
+        url: config.url,
+        hasToken: true,
+        // The Agent only listens on loopback. Returning the token to a loopback
+        // web app enables one-click local discovery without exposing it to the
+        // hosted canvas origin.
+        ...(isLoopbackOrigin(req.headers.origin) ? { token: config.token } : {}),
+    }));
     app.use((req, res, next) => {
         if (validToken(req, requestUrl(req, config), config.token)) return next();
         res.status(401).json({ ok: false, error: "invalid token" });
@@ -532,6 +541,16 @@ function setCors(req: Request, res: Response, url: URL, config: CanvasAgentConfi
     }
     res.setHeader("Vary", "Origin");
     return config.origins.includes(origin);
+}
+
+function isLoopbackOrigin(origin: string | string[] | undefined) {
+    if (typeof origin !== "string" || !origin) return false;
+    try {
+        const hostname = new URL(origin).hostname.toLowerCase();
+        return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+    } catch {
+        return false;
+    }
 }
 
 /** 校验请求查询参数或请求头中的连接 token。 */
