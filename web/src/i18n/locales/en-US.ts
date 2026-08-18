@@ -172,6 +172,7 @@ export default {
         empty: "No images generated yet",
         resultAlt: "Generated image {{count}}",
         addReference: "Add as reference",
+        comfyuiReferencesUnsupported: "This ComfyUI single workflow currently supports prompts only, not reference images.",
     },
     videoWorkbench: {
         title: "Video Studio",
@@ -488,6 +489,7 @@ export default {
             selectModels: "Select models",
             scriptReady: "Script set",
             script: "Request script",
+            comfyuiManagedLocally: "Managed by the local Agent .env.local",
             empty: "Select models to fetch or manually add models.",
             capabilities: {
                 image: "Image",
@@ -572,6 +574,7 @@ export default {
         },
         protocols: {
             ark: "Volcengine Ark",
+            comfyui: "ComfyUI workflow / video simulation",
         },
     },
     agent: {

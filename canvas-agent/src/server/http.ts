@@ -10,10 +10,12 @@ import { messageMetadataStore } from "../agent/message-metadata.js";
 import type { AgentAttachment, AgentPermissionMode } from "../agent/types.js";
 import { AGENT_PROTOCOL_VERSION, CanvasSession } from "../canvas/session.js";
 import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWorkspace, type CanvasAgentConfig } from "../config.js";
+import { getComfyUiStatus, runComfyUiTask } from "../generation/comfyui-task.js";
+import { runImageTask } from "../generation/image-task.js";
+import { createSimulatedVideoTask, getSimulatedVideoTask } from "../generation/video-task.js";
 import { logger } from "../utils/logger.js";
 import { checkVersions } from "../version-check.js";
 import { SkillStore, SkillStoreError } from "../skills/store.js";
-import { runImageTask } from "../generation/image-task.js";
 
 /** 启动仅监听本机的 Canvas Agent HTTP 服务。 */
 export function startHttpServer() {
@@ -127,6 +129,7 @@ export function startHttpServer() {
         protocolVersion: AGENT_PROTOCOL_VERSION,
         url: config.url,
         hasToken: true,
+        comfyui: getComfyUiStatus(),
         // The Agent only listens on loopback. Returning the token to a loopback
         // web app enables one-click local discovery without exposing it to the
         // hosted canvas origin.
@@ -143,6 +146,28 @@ export function startHttpServer() {
             if (!res.writableEnded) controller.abort();
         });
         res.json({ ok: true, data: await runImageTask(req.body || {}, controller.signal) });
+    }));
+    app.get("/generation/comfyui/config", (_req, res) => res.json({ ok: true, data: getComfyUiStatus() }));
+    app.post("/generation/comfyui/tasks", route(async (req, res) => {
+        const controller = new AbortController();
+        req.on("aborted", () => controller.abort());
+        res.on("close", () => {
+            if (!res.writableEnded) controller.abort();
+        });
+        res.json({ ok: true, data: await runComfyUiTask(req.body || {}, controller.signal) });
+    }));
+    app.post("/generation/video/tasks", route(async (req, res) => {
+        const controller = new AbortController();
+        req.on("aborted", () => controller.abort());
+        res.on("close", () => {
+            if (!res.writableEnded) controller.abort();
+        });
+        res.json({ ok: true, data: createSimulatedVideoTask(req.body || {}, controller.signal) });
+    }));
+    app.get("/generation/video/tasks/:taskId", route(async (req, res) => {
+        const task = getSimulatedVideoTask(routeParam(req.params.taskId));
+        if (!task) return void res.status(404).json({ ok: false, error: "视频模拟任务不存在或已过期" });
+        res.json({ ok: true, data: task });
     }));
     app.get("/events", (req, res) => {
         session.openEvents(requestUrl(req, config), res, ensureSiteWorkspace(config).activeThreadId || "");

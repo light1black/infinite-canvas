@@ -38,6 +38,14 @@ Codex app 插件会读取启动输出里的 Local URL 和 Connect token，并直
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
+## 本地生成
+
+图片的 OpenAI 兼容接口与 ComfyUI 工作流配置都只从 `canvas-agent/.env.local` 读取，浏览器不会保存这些密钥。可复制 `.env.example` 为 `.env.local` 后按需填写。
+
+ComfyUI 第一版只执行一个 API 格式导出的 workflow JSON：设置 `COMFYUI_WORKFLOW_PATH`、提示词节点 ID 及输入字段后，Agent 会向本机 `COMFYUI_BASE_URL` 的 `/prompt`、`/history` 和 `/view` 发请求。未安装 ComfyUI、未配置 workflow，或在 `COMFYUI_ALLOW_SIMULATION=true` 时服务不可用，都会返回明确标记的模拟图片，不会访问外部服务；当前不支持参考图输入。
+
+在网页渠道中选择「ComfyUI 单工作流 / 视频模拟」可使用 `comfyui-workflow` 生图模型和 `video-simulation` 视频模型。视频模型当前只创建本地模拟 MP4 任务，供画布和工作台完成完整的创建、查询、保存与播放流程；尚未接入 Seedance 或其他真实视频服务。
+
 ## 发布
 
 `canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `@basketikun/canvas-agent`。

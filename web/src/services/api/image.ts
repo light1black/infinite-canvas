@@ -8,6 +8,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { requestAgentComfyUiTask } from "./agent-comfyui";
 import { requestAgentImageTask } from "./agent-image";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
@@ -756,6 +757,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         }, options?.signal);
         return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
     }
+    if (requestConfig.apiFormat === "comfyui") {
+        const result = await requestAgentComfyUiTask({ prompt: withSystemPrompt(requestConfig, prompt), count: n }, options?.signal);
+        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
+    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
@@ -864,6 +869,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         }, options?.signal);
         return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
     }
+    if (requestConfig.apiFormat === "comfyui") throw new Error(i18n.t("imageWorkbench.comfyuiReferencesUnsupported"));
 
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -936,6 +942,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
+        if (config.apiFormat === "comfyui") return ["comfyui-workflow", "video-simulation"];
         if (config.apiFormat === "gemini") {
             const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
             validateGeminiPayload(response.data);

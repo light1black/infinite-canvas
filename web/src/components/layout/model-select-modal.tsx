@@ -61,6 +61,11 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
 
     const fetchModels = async () => {
         if (!channel) return;
+        if (channel.apiFormat === "comfyui") {
+            setFetched(["comfyui-workflow", "video-simulation"]);
+            setActiveTab("new");
+            return;
+        }
         if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
             message.error(t("config.modelSelect.missingConfig"));
             return;

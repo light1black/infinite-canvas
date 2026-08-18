@@ -73,7 +73,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const finishConfig = () => {
-        const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
+        const ready = config.channels.some((channel) => channel.models.length && (channel.apiFormat === "comfyui" || (channel.baseUrl.trim() && channel.apiKey.trim())));
         setConfigDialogOpen(false);
         if (!ready) return;
         message.success(t(shouldPromptContinue ? "config.savedContinue" : "config.saved"));
@@ -387,6 +387,7 @@ function normalizeImageCount(value: string) {
 function apiFormatLabel(apiFormat: ApiCallFormat, t: TFunction) {
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "ark") return t("config.protocols.ark");
+    if (apiFormat === "comfyui") return t("config.protocols.comfyui");
     return "OpenAI";
 }
 

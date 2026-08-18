@@ -6,6 +6,7 @@ description: Implemented changes that still need manual verification
 # Pending Tests
 
 - Stage 3 OpenAI-compatible image tasks: the local Agent should read image API settings from `canvas-agent/.env.local`; with no key, the workbench and canvas image actions must return explicitly marked simulated images without making an external request; with a key, verify `/v1/images/generations`, `/v1/images/edits`, model, size, quality, count, transparent background, error, and cancellation behavior. The canvas must remain independently editable when Agent is stopped.
+- Stage 4 local ComfyUI workflow and video simulation: add a `ComfyUI workflow / video simulation` channel, fetch `comfyui-workflow` and `video-simulation`, and assign their image and video capabilities. Without a local ComfyUI installation or `COMFYUI_WORKFLOW_PATH`, image generation must return an explicitly marked simulated image without an external request; a video task must create, poll, save, and play the local simulated MP4. With a local ComfyUI API-format workflow later configured, verify that the configured prompt node is replaced and its image output is stored. Reference-image editing must clearly report that this first workflow does not support it. Stopping the Agent must not prevent canvas editing.
 
 The current release needs manual verification in these areas:
 

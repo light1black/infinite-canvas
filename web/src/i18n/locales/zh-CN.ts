@@ -172,6 +172,7 @@ export default {
         empty: "还没有生成图片",
         resultAlt: "生成结果 {{count}}",
         addReference: "加入参考图",
+        comfyuiReferencesUnsupported: "当前 ComfyUI 单工作流只支持提示词，暂不支持参考图",
     },
     videoWorkbench: {
         title: "视频创作台",
@@ -488,6 +489,7 @@ export default {
             selectModels: "选择模型",
             scriptReady: "脚本已设",
             script: "调用脚本",
+            comfyuiManagedLocally: "由本地 Agent 的 .env.local 管理",
             empty: "点击「选择模型」拉取或手动增加模型。",
             capabilities: {
                 image: "生图",
@@ -572,6 +574,7 @@ export default {
         },
         protocols: {
             ark: "火山方舟",
+            comfyui: "ComfyUI 单工作流 / 视频模拟",
         },
     },
     agent: {
