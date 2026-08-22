@@ -8,8 +8,6 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
-import { requestAgentComfyUiTask } from "./agent-comfyui";
-import { requestAgentImageTask } from "./agent-image";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -306,6 +304,7 @@ function readApiErrorMessage(value: unknown): string {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return apiText("requestCanceled");
     if (axios.isAxiosError(error)) {
+        if (!error.response && error.code === "ERR_NETWORK") return apiText("corsRequired");
         const responseData = error.response?.data;
         // Prefer the API error from the response body.
         const apiMsg = readApiErrorMessage(responseData);
@@ -745,22 +744,6 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
-    if (requestConfig.apiFormat === "openai") {
-        const quality = normalizeQuality(config.quality);
-        const result = await requestAgentImageTask({
-            prompt: withSystemPrompt(requestConfig, prompt),
-            model: requestConfig.model,
-            count: n,
-            size: resolveRequestSize(quality, config.size),
-            quality,
-            background: normalizeBackground(config.background),
-        }, options?.signal);
-        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
-    }
-    if (requestConfig.apiFormat === "comfyui") {
-        const result = await requestAgentComfyUiTask({ prompt: withSystemPrompt(requestConfig, prompt), count: n }, options?.signal);
-        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
-    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
@@ -822,54 +805,6 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
-
-    if (requestConfig.apiFormat === "ark") {
-        if (mask) throw new Error(apiText("maskModelUnsupported"));
-        const quality = normalizeQuality(config.quality);
-        const requestSize = resolveRequestSize(quality, config.size);
-        const background = normalizeBackground(config.background);
-        const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
-        try {
-            const response = await axios.post<ImageApiResponse>(
-                aiApiUrl(requestConfig, "/images/generations"),
-                {
-                    model: requestConfig.model,
-                    prompt: withSystemPrompt(requestConfig, requestPrompt),
-                    n,
-                    response_format: "b64_json",
-                    output_format: IMAGE_OUTPUT_FORMAT,
-                    image: refs,
-                    ...(quality ? { quality } : {}),
-                    ...(requestSize ? { size: requestSize } : {}),
-                    ...(background ? { background } : {}),
-                },
-                {
-                    headers: aiHeaders(requestConfig, "application/json"),
-                    signal: options?.signal,
-                },
-            );
-            return parseImagePayload(response.data);
-        } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
-        }
-    }
-
-    if (requestConfig.apiFormat === "openai") {
-        if (mask) throw new Error(apiText("maskModelUnsupported"));
-        const quality = normalizeQuality(config.quality);
-        const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
-        const result = await requestAgentImageTask({
-            prompt: withSystemPrompt(requestConfig, requestPrompt),
-            images,
-            model: requestConfig.model,
-            count: n,
-            size: resolveRequestSize(quality, config.size),
-            quality,
-            background: normalizeBackground(config.background),
-        }, options?.signal);
-        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
-    }
-    if (requestConfig.apiFormat === "comfyui") throw new Error(i18n.t("imageWorkbench.comfyuiReferencesUnsupported"));
 
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -942,7 +877,6 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
-        if (config.apiFormat === "comfyui") return ["comfyui-workflow", "video-simulation"];
         if (config.apiFormat === "gemini") {
             const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
             validateGeminiPayload(response.data);
