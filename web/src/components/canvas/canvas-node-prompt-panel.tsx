@@ -15,6 +15,7 @@ import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { getNodeGenerationCount } from "@/lib/canvas/canvas-generation-helpers";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -115,7 +116,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     ) : (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
-                            <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={(textCount) => onConfigChange(node.id, { textCount })} />
+                            <CanvasTextSettingsPopover
+                                config={config}
+                                onConfigChange={(key, value) => {
+                                    if (key === "reasoningEffort") onConfigChange(node.id, { reasoningEffort: value as AiConfig["reasoningEffort"] });
+                                }}
+                            />
                         </>
                     )}
                 </div>
@@ -176,7 +182,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
-        count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
+        count: String(getNodeGenerationCount(node, mode)),
     };
 }
 
@@ -187,7 +193,8 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     return { [key]: value };
 }
 
-function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
+function audioConfigPatch(key: CanvasAudioSettingKey | "count", value: string) {
+    if (key === "count") return {};
     if (key === "audioVoice") return { audioVoice: value };
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Settings2 } from "lucide-react";
 import { Button } from "antd";
+import { useTranslation } from "react-i18next";
 
 import { AudioSettingsPanel } from "@/components/audio-settings-panel";
 import { audioFormatLabel, audioSpeedLabel, audioVoiceLabel } from "@/lib/audio-generation";
@@ -13,17 +14,20 @@ export type CanvasAudioSettingKey = "audioVoice" | "audioFormat" | "audioSpeed" 
 
 type CanvasAudioSettingsPopoverProps = {
     config: AiConfig;
-    onConfigChange: (key: CanvasAudioSettingKey, value: string) => void;
+    onConfigChange: (key: CanvasAudioSettingKey | "count", value: string) => void;
+    showCount?: boolean;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
 };
 
-export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClassName, placement = "topLeft" }: CanvasAudioSettingsPopoverProps) {
+export function CanvasAudioSettingsPopover({ config, onConfigChange, showCount = false, buttonClassName, placement = "topLeft" }: CanvasAudioSettingsPopoverProps) {
+    const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
 
     useEffect(() => {
         if (!open) return;
@@ -46,14 +50,14 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClass
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} showCount={showCount} /> : null;
 
     return (
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[170px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
                     <span className="truncate">
-                        {audioVoiceLabel(config.audioVoice)} · {audioFormatLabel(config.audioFormat)} · {audioSpeedLabel(config.audioSpeed)}
+                        {audioVoiceLabel(config.audioVoice)} · {audioFormatLabel(config.audioFormat)} · {audioSpeedLabel(config.audioSpeed)}{showCount ? ` · ${t("settingsPanels.audio.audios", { count })}` : ""}
                     </span>
                 </Button>
             </span>
@@ -69,13 +73,15 @@ function AudioSettingsPortal({
     theme,
     config,
     onConfigChange,
+    showCount,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
     placement: CanvasAudioSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
-    onConfigChange: (key: CanvasAudioSettingKey, value: string) => void;
+    onConfigChange: (key: CanvasAudioSettingKey | "count", value: string) => void;
+    showCount: boolean;
 }) {
     const width = 356;
     const gap = 8;
@@ -107,7 +113,7 @@ function AudioSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <AudioSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            <AudioSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" showCount={showCount} />
         </div>,
         document.body,
     );

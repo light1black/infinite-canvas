@@ -12,10 +12,12 @@ import { AGENT_PROTOCOL_VERSION, CanvasSession } from "../canvas/session.js";
 import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWorkspace, type CanvasAgentConfig } from "../config.js";
 import { getComfyUiStatus, runComfyUiTask } from "../generation/comfyui-task.js";
 import { runImageTask } from "../generation/image-task.js";
+import { runSkillImageTask } from "../generation/skill-image-task.js";
 import { createSimulatedVideoTask, getSimulatedVideoTask } from "../generation/video-task.js";
 import { logger } from "../utils/logger.js";
 import { checkVersions } from "../version-check.js";
 import { SkillStore, SkillStoreError } from "../skills/store.js";
+import { evaluateCorsOrigin } from "./cors-policy.js";
 
 /** 启动仅监听本机的 Canvas Agent HTTP 服务。 */
 export function startHttpServer() {
@@ -147,6 +149,14 @@ export function startHttpServer() {
         });
         res.json({ ok: true, data: await runImageTask(req.body || {}, controller.signal) });
     }));
+    app.post("/generation/skill/image/tasks", route(async (req, res) => {
+        const controller = new AbortController();
+        req.on("aborted", () => controller.abort());
+        res.on("close", () => {
+            if (!res.writableEnded) controller.abort();
+        });
+        res.json({ ok: true, data: await runSkillImageTask(req.body || {}, controller.signal) });
+    }));
     app.get("/generation/comfyui/config", (_req, res) => res.json({ ok: true, data: getComfyUiStatus() }));
     app.post("/generation/comfyui/tasks", route(async (req, res) => {
         const controller = new AbortController();
@@ -190,6 +200,13 @@ export function startHttpServer() {
         if (!data) throw new Error("图片附件内容无效");
         res.setHeader("Cache-Control", "no-store");
         res.type(attachment.type).send(Buffer.from(data, "base64"));
+    }));
+    app.get("/agent/local-images/:assetId", route(async (req, res) => {
+        const asset = session.getLocalImage(String(req.query.clientId || ""), routeParam(req.params.assetId));
+        const file = await stat(asset.path);
+        if (!file.isFile()) return void res.status(404).json({ ok: false, error: "本机图片文件已不存在" });
+        res.setHeader("Cache-Control", "no-store");
+        res.type(path.extname(asset.path)).send(await readFile(asset.path));
     }));
     app.get("/agent/message-assets/:messageKey/:assetFile", route(async (req, res) => {
         const asset = await messageMetadataStore.readAsset(routeParam(req.params.messageKey), routeParam(req.params.assetFile));
@@ -569,12 +586,13 @@ function setCors(req: Request, res: Response, url: URL, config: CanvasAgentConfi
     res.setHeader("Access-Control-Allow-Private-Network", "true");
     if (!origin || req.method === "OPTIONS" || url.pathname === "/health" || url.pathname === "/config") return true;
     config.origins ||= [];
-    if (validToken(req, url, config.token) && !config.origins.includes(origin)) {
-        config.origins.push(origin);
+    const decision = evaluateCorsOrigin(origin, config.origins, validToken(req, url, config.token));
+    if (decision.origins.length !== config.origins.length) {
+        config.origins = decision.origins;
         saveConfig(config);
     }
     res.setHeader("Vary", "Origin");
-    return config.origins.includes(origin);
+    return decision.allowed;
 }
 
 function isLoopbackOrigin(origin: string | string[] | undefined) {

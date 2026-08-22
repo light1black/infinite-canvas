@@ -79,6 +79,7 @@ export function useImageEditorViewport(image: ImageSize | null, open: boolean) {
 
     const baseSize = fitImage(image, viewportSize);
     const stageSize = { width: baseSize.width * zoom, height: baseSize.height * zoom };
+    const actualZoom = image && baseSize.width ? image.width / baseSize.width : 1;
     const contentSize = {
         width: Math.max(viewportSize.width, stageSize.width),
         height: Math.max(viewportSize.height, stageSize.height),
@@ -188,6 +189,9 @@ export function useImageEditorViewport(image: ImageSize | null, open: boolean) {
         zoomIn: () => setZoomAround(zoom * zoomStep),
         zoomOut: () => setZoomAround(zoom / zoomStep),
         resetZoom: () => setZoomAround(minZoom),
+        fitZoom: () => setZoomAround(minZoom),
+        actualSize: () => setZoomAround(actualZoom),
+        actualZoom,
         contentStyle: { width: contentSize.width, height: contentSize.height } satisfies CSSProperties,
         stageStyle: {
             left: stageOffset.left,

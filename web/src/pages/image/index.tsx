@@ -25,6 +25,8 @@ import i18n from "@/i18n";
 type GeneratedImage = {
     id: string;
     dataUrl: string;
+    mode?: "simulated" | "openai-compatible" | "comfyui";
+    fallbackReason?: string;
     storageKey?: string;
     durationMs: number;
     width: number;
@@ -180,7 +182,7 @@ export default function ImagePage() {
         const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
 
         const result = await Promise.allSettled(tasks);
-        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
+        const successImages = result.flatMap((item) => (item.status === "fulfilled" ? [item.value] : []));
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
@@ -207,7 +209,11 @@ export default function ImagePage() {
                     images: logImages,
                 }),
             );
-            successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            if (successCount) {
+                successImages.some((image) => image.mode === "simulated") ? message.warning(t("imageWorkbench.simulatedGenerated")) : message.success(t("imageWorkbench.generated"));
+            } else {
+                message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            }
         } finally {
             setRunning(false);
         }
@@ -331,7 +337,7 @@ export default function ImagePage() {
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
+            const nextImage = { id: image.id, dataUrl: image.dataUrl, mode: image.mode, fallbackReason: image.fallbackReason, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
@@ -416,7 +422,9 @@ export default function ImagePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                <div data-canvas-no-zoom className="overscroll-contain" onWheelCapture={(event) => event.stopPropagation()}>
+                                    <Input.TextArea className="overscroll-contain" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                </div>
                             </div>
 
                             <div className="min-w-0">
@@ -596,8 +604,10 @@ function ResultImageCard({
     const { t } = useTranslation();
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+            {image.mode === "simulated" ? <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">{t("imageWorkbench.simulatedPreview")}</div> : null}
             <Image src={image.dataUrl} alt={t("imageWorkbench.resultAlt", { count: index + 1 })} className="aspect-square object-cover" />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
+                {image.mode === "simulated" ? <Typography.Paragraph ellipsis={{ rows: 2, tooltip: image.fallbackReason }} className="!mb-0 !text-xs !text-amber-700 dark:!text-amber-300">{image.fallbackReason || t("imageWorkbench.simulatedReason")}</Typography.Paragraph> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
                         {image.width}x{image.height}

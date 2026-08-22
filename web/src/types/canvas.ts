@@ -23,10 +23,14 @@ export type CanvasNodeTypeId = CanvasNodeType | (string & {});
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
+export type CanvasGenerationTaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type CanvasGenerationTaskPhase = "created" | "executing" | "persisting" | "completed" | "interrupted";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasImageExecutor = "api" | "general-image-generation" | "aigc-cli";
 
 export type CanvasNodeImage = {
     id: string;
+    resultKey?: string;
     status: CanvasNodeStatus;
     errorDetails?: string;
     content: string;
@@ -37,15 +41,44 @@ export type CanvasNodeImage = {
     mimeType: string;
 };
 
+export type CanvasGenerationTask = {
+    taskId: string;
+    mode: CanvasGenerationMode;
+    status: CanvasGenerationTaskStatus;
+    phase: CanvasGenerationTaskPhase;
+    sourceNodeIds: string[];
+    resultNodeIds: string[];
+    resultKeys: string[];
+    retryCount: number;
+    createdAt: string;
+    updatedAt: string;
+    persistedAt?: string;
+    events?: CanvasGenerationTaskEvent[];
+    errorDetails?: string;
+};
+
+export type CanvasGenerationTaskEvent = {
+    at: string;
+    status: CanvasGenerationTaskStatus;
+    phase: CanvasGenerationTaskPhase;
+    errorDetails?: string;
+};
+
 export type CanvasNodeMetadata = {
     content?: string;
     composerContent?: string;
     prompt?: string;
     status?: CanvasNodeStatus;
     errorDetails?: string;
+    generationTask?: CanvasGenerationTask;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
+    imageExecutor?: CanvasImageExecutor;
+    skillName?: "general-image-generation" | "aigc-cli";
+    skillModel?: string;
+    fallbackToApi?: boolean;
+    localPaths?: string[];
     model?: string;
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;
@@ -53,6 +86,9 @@ export type CanvasNodeMetadata = {
     background?: string;
     count?: number;
     textCount?: number;
+    imageCount?: number;
+    videoCount?: number;
+    audioCount?: number;
     seconds?: string;
     vquality?: string;
     generateAudio?: string;

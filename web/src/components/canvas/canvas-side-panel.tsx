@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App, Empty, Input, Popconfirm, Select, Spin, Tag } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Check, ChevronRight, Download, Eye, FileText, Image as ImageIcon, ListChecks, Music2, Plus, Search, Settings2, Square, Trash2, Type, Video } from "lucide-react";
@@ -133,6 +133,7 @@ function TabButton({ label, active, theme, onClick }: { label: string; active: b
 // ---------------------------------------------------------------------------
 
 const NODE_FILTER_VALUES = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Audio, CanvasNodeType.Config, CanvasNodeType.Group];
+const NODE_LIST_PAGE_SIZE = 100;
 
 function nodePreviewText(node: CanvasNodeData) {
     if (node.type === CanvasNodeType.Text) return node.metadata?.content || node.metadata?.prompt || "";
@@ -147,11 +148,17 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, th
     const [selectMode, setSelectMode] = useState(false);
     const [checked, setChecked] = useState<Set<string>>(new Set());
     const [exporting, setExporting] = useState(false);
+    const [visibleCount, setVisibleCount] = useState(NODE_LIST_PAGE_SIZE);
 
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return nodes.filter((node) => (typeFilter === "all" || node.type === typeFilter) && (!query || [node.title, node.metadata?.content, node.metadata?.prompt].filter(Boolean).join(" ").toLowerCase().includes(query)));
     }, [nodes, keyword, typeFilter]);
+    const visibleFiltered = filtered.slice(0, visibleCount);
+
+    useEffect(() => {
+        setVisibleCount(NODE_LIST_PAGE_SIZE);
+    }, [keyword, typeFilter]);
 
     const exitSelect = () => {
         setSelectMode(false);
@@ -206,7 +213,7 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, th
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 {filtered.length ? (
                     <div className="space-y-1.5">
-                        {filtered.map((node) => {
+                        {visibleFiltered.map((node) => {
                             const Icon = NODE_TYPE_ICON[node.type] || FileText;
                             const isImage = node.type === CanvasNodeType.Image && node.metadata?.content;
                             const isChecked = checked.has(node.id);
@@ -234,6 +241,15 @@ function CanvasNodesTab({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, th
                                 </div>
                             );
                         })}
+                        {visibleCount < filtered.length ? (
+                            <button
+                                type="button"
+                                onClick={() => setVisibleCount((count) => count + NODE_LIST_PAGE_SIZE)}
+                                className="w-full rounded-md px-2 py-2 text-xs font-medium opacity-60 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+                            >
+                                {t("canvas.sidePanel.loadMoreNodes", { count: Math.min(NODE_LIST_PAGE_SIZE, filtered.length - visibleCount) })}
+                            </button>
+                        ) : null}
                     </div>
                 ) : (
                     <div className="pt-16 text-center text-sm opacity-40">{t("canvas.sidePanel.noNodes")}</div>
@@ -464,7 +480,7 @@ const CanvasPromptsTab = memo(function CanvasPromptsTab({ onInsert, theme }: { o
             <div className="px-3 pb-2.5 pt-1">
                 <Input size="small" allowClear prefix={<Search className="size-3.5 text-stone-400" />} placeholder={t("canvas.sidePanel.searchPrompts")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" data-canvas-no-zoom onWheel={(event) => event.stopPropagation()}>
                 <div className="space-y-1">
                     {enabledSources.length ? enabledSources.map((source) => (
                         <PromptSourceGroup
@@ -554,6 +570,20 @@ function PromptSourceGroup({
 
 function PromptRow({ item, theme, onInsert, onView }: { item: Prompt; theme: CanvasTheme; onInsert: () => void; onView: () => void }) {
     const { t } = useTranslation();
+    const promptRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const prompt = promptRef.current;
+        if (!prompt) return;
+        const handleWheel = (event: WheelEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            prompt.scrollTop += event.deltaY;
+        };
+        prompt.addEventListener("wheel", handleWheel, { passive: false });
+        return () => prompt.removeEventListener("wheel", handleWheel);
+    }, []);
+
     return (
         <div className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-black/5 dark:hover:bg-white/5">
             {item.coverUrl ? (
@@ -565,7 +595,13 @@ function PromptRow({ item, theme, onInsert, onView }: { item: Prompt; theme: Can
             )}
             <button type="button" onClick={onView} className="min-w-0 flex-1 text-left">
                 <div className="truncate text-sm font-medium leading-snug">{item.title}</div>
-                <div className="mt-0.5 truncate text-xs leading-snug opacity-50">{item.prompt}</div>
+                <div
+                    ref={promptRef}
+                    className="hover-scrollbar mt-0.5 h-8 overflow-y-auto overscroll-contain whitespace-pre-wrap break-words pr-1 text-xs leading-4 opacity-50"
+                    data-canvas-no-zoom
+                >
+                    {item.prompt}
+                </div>
             </button>
             <div className="flex shrink-0 flex-col items-center gap-0.5">
                 <button type="button" onClick={onView} className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10" aria-label={t("canvas.sidePanel.viewDetails")} title={t("canvas.sidePanel.viewDetails")}>

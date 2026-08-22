@@ -3,6 +3,8 @@ import { discoverAgentConfig, fetchAgentJson } from "./canvas-agent";
 type AgentImageTaskInput = {
     prompt: string;
     images?: string[];
+    baseUrl?: string;
+    apiKey?: string;
     model?: string;
     size?: string;
     quality?: string;
@@ -12,7 +14,7 @@ type AgentImageTaskInput = {
 
 type AgentImageTaskResponse = {
     ok?: boolean;
-    data?: { taskId: string; status: "succeeded"; mode: "simulated" | "openai-compatible"; model: string; images: string[] };
+    data?: { taskId: string; status: "succeeded"; mode: "simulated" | "openai-compatible"; fallbackReason?: string; model: string; images: string[] };
 };
 
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";

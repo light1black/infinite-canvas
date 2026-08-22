@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Copy, Download, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
+import { ChevronRight, Copy, Download, Group, Image as ImageIcon, Maximize2, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -24,6 +24,7 @@ type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
     mentionReferences?: CanvasResourceReference[];
@@ -52,7 +53,7 @@ type CanvasNodeProps = {
     onDeleteBatchImage?: (nodeId: string, imageId: string) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
-    onViewImage?: (node: CanvasNodeData, imageId?: string) => void;
+    onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -71,13 +72,13 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onViewImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: (imageId: string) => void;
     onDuplicateBatchImage?: (imageId: string) => void;
     onDownloadBatchImage?: (imageId: string) => void;
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
-    onViewBatchImage?: (imageId: string) => void;
     groupChildCount: number;
 };
 
@@ -89,6 +90,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
+    editRequestNonce = 0,
     showPanel,
     showImageInfo,
     mentionReferences = [],
@@ -200,6 +202,11 @@ export const CanvasNode = React.memo(function CanvasNode({
         textarea?.focus();
         textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
     }, [isEditingContent]);
+
+    useEffect(() => {
+        if (!editRequestNonce || data.type !== CanvasNodeType.Text) return;
+        setIsEditingContent(true);
+    }, [data.type, editRequestNonce]);
 
     useEffect(() => {
         if (!isEditingContent) return;
@@ -359,6 +366,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
                 onDoubleClick={(event) => {
+                    if (isBatchRoot) {
+                        event.stopPropagation();
+                        onToggleBatch?.(data.id);
+                        return;
+                    }
                     if (definition?.onDoubleClick && pluginContext) {
                         if (definition.onDoubleClick(pluginContext)) event.stopPropagation();
                         return;
@@ -397,13 +409,13 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
                         onGenerateImage={onGenerateImage}
+                        onViewImage={onViewImage}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={(imageId) => onSetBatchPrimary?.(data.id, imageId)}
                         onDuplicateBatchImage={(imageId) => onDuplicateBatchImage?.(data, imageId)}
                         onDownloadBatchImage={(imageId) => onDownloadBatchImage?.(data, imageId)}
                         onRetryBatchImage={(imageId) => onRetryBatchImage?.(data, imageId)}
                         onDeleteBatchImage={(imageId) => onDeleteBatchImage?.(data.id, imageId)}
-                        onViewBatchImage={(imageId) => onViewImage?.(data, imageId)}
                         groupChildCount={groupChildCount}
                     />
                 </div>
@@ -580,7 +592,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             onDownloadBatchImage={props.onDownloadBatchImage}
             onRetryBatchImage={props.onRetryBatchImage}
             onDeleteBatchImage={props.onDeleteBatchImage}
-            onViewBatchImage={props.onViewBatchImage}
+            onViewImage={props.onViewImage}
         />
     );
 }
@@ -638,7 +650,7 @@ function ImageContent({
     onDownloadBatchImage,
     onRetryBatchImage,
     onDeleteBatchImage,
-    onViewBatchImage,
+    onViewImage,
 }: {
     node: CanvasNodeData;
     batchExpanded: boolean;
@@ -648,7 +660,7 @@ function ImageContent({
     onDownloadBatchImage?: (imageId: string) => void;
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
-    onViewBatchImage?: (imageId: string) => void;
+    onViewImage?: (node: CanvasNodeData) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
@@ -660,11 +672,11 @@ function ImageContent({
     const primaryContent = primaryImage?.content || node.metadata?.content;
 
     return (
-        <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded}>
+        <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} onToggleBatch={onToggleBatch}>
             {batchExpanded
                 ? images
                       .filter((image) => image.id !== primaryImageId)
-                      .map((image, index) => <ExpandedImageCard key={image.id} node={node} image={image} index={index} onView={() => onViewBatchImage?.(image.id)} onSetPrimary={() => onSetBatchPrimary?.(image.id)} onDuplicate={() => onDuplicateBatchImage?.(image.id)} onDownload={() => onDownloadBatchImage?.(image.id)} onRetry={() => onRetryBatchImage?.(image.id)} onDelete={() => onDeleteBatchImage?.(image.id)} />)
+                      .map((image, index) => <ExpandedImageCard key={image.id} node={node} image={image} index={index} onSetPrimary={() => onSetBatchPrimary?.(image.id)} onDuplicate={() => onDuplicateBatchImage?.(image.id)} onDownload={() => onDownloadBatchImage?.(image.id)} onRetry={() => onRetryBatchImage?.(image.id)} onDelete={() => onDeleteBatchImage?.(image.id)} />)
                 : null}
             <div className="h-full w-full overflow-hidden rounded-3xl">
                 {primaryContent ? (
@@ -681,10 +693,14 @@ function ImageContent({
             </div>
             {primaryImage?.status === "error" ? <BatchImageFailureActions placement="left" onRetry={() => onRetryBatchImage?.(primaryImage.id)} onDelete={() => onDeleteBatchImage?.(primaryImage.id)} /> : null}
             {primaryImage?.content ? (
-                <button type="button" className="absolute left-2.5 top-2.5 z-30 flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-medium shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("common.download")} onClick={(event) => (event.stopPropagation(), onDownloadBatchImage?.(primaryImage.id))}>
-                    <Download className="size-3" />
-                    {t("common.download")}
-                </button>
+                <div className="absolute left-2.5 top-2.5 z-30 flex items-center gap-1">
+                    <button type="button" className="grid size-8 place-items-center rounded-lg border shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("common.download")} aria-label={t("common.download")} onClick={(event) => (event.stopPropagation(), onDownloadBatchImage?.(primaryImage.id))}>
+                        <Download className="size-3" />
+                    </button>
+                    <button type="button" className="grid size-8 place-items-center rounded-lg border shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("canvas.imageTools.viewTitle")} aria-label={t("canvas.imageTools.viewTitle")} onClick={(event) => (event.stopPropagation(), onViewImage?.(node))}>
+                        <Maximize2 className="size-3" />
+                    </button>
+                </div>
             ) : null}
             {isBatchRoot ? (
                 <button
@@ -707,7 +723,7 @@ function ImageContent({
     );
 }
 
-function ExpandedImageCard({ node, image, index, onView, onSetPrimary, onDuplicate, onDownload, onRetry, onDelete }: { node: CanvasNodeData; image: CanvasNodeImage; index: number; onView: () => void; onSetPrimary: () => void; onDuplicate: () => void; onDownload: () => void; onRetry: () => void; onDelete: () => void }) {
+function ExpandedImageCard({ node, image, index, onSetPrimary, onDuplicate, onDownload, onRetry, onDelete }: { node: CanvasNodeData; image: CanvasNodeImage; index: number; onSetPrimary: () => void; onDuplicate: () => void; onDownload: () => void; onRetry: () => void; onDelete: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const count = node.metadata?.images?.length || 0;
@@ -739,11 +755,7 @@ function ExpandedImageCard({ node, image, index, onView, onSetPrimary, onDuplica
             }
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => {
-                if (!image.content || (event.target instanceof Element && event.target.closest("button"))) return;
-                event.stopPropagation();
-                onView();
-            }}
+            onDoubleClick={(event) => event.stopPropagation()}
         >
             {image.content ? <img src={image.content} alt={node.title} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" /> : <ImageSlotStatus image={image} />}
             {image.content ? (
@@ -809,11 +821,21 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     );
 }
 
-function BatchFrame({ batchCount, batchExpanded, children }: { batchCount: number; batchExpanded: boolean; children: ReactNode }) {
+function BatchFrame({ batchCount, batchExpanded, onToggleBatch, children }: { batchCount: number; batchExpanded: boolean; onToggleBatch?: () => void; children: ReactNode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchRoot = batchCount > 1;
     return (
-        <div className="group/batch relative h-full w-full overflow-visible">
+        <div
+            className="group/batch relative h-full w-full overflow-visible"
+            onDoubleClick={
+                isBatchRoot
+                    ? (event) => {
+                          event.stopPropagation();
+                          onToggleBatch?.();
+                      }
+                    : undefined
+            }
+        >
             {isBatchRoot ? (
                 <div className="pointer-events-none absolute inset-0 overflow-visible">
                     {Array.from({ length: Math.min(batchCount - 1, 3) }).map((_, index) => (

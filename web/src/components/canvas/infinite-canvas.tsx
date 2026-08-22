@@ -90,19 +90,27 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
 
         const delta = -event.deltaY;
         const factor = Math.pow(1.1, delta / 100);
-        const newScale = Math.min(Math.max(viewport.k * factor, 0.05), 5);
+        const currentViewport = nextViewportRef.current || viewport;
+        const newScale = Math.min(Math.max(currentViewport.k * factor, 0.05), 5);
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
-        const worldX = (mouseX - viewport.x) / viewport.k;
-        const worldY = (mouseY - viewport.y) / viewport.k;
+        const worldX = (mouseX - currentViewport.x) / currentViewport.k;
+        const worldY = (mouseY - currentViewport.y) / currentViewport.k;
 
-        onViewportChange({
+        nextViewportRef.current = {
             x: mouseX - worldX * newScale,
             y: mouseY - worldY * newScale,
             k: newScale,
+        };
+        if (frameRef.current) return;
+        frameRef.current = requestAnimationFrame(() => {
+            frameRef.current = null;
+            const nextViewport = nextViewportRef.current;
+            nextViewportRef.current = null;
+            if (nextViewport) onViewportChange(nextViewport);
         });
     };
 
@@ -163,7 +171,9 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
             if (frameRef.current) return;
             frameRef.current = requestAnimationFrame(() => {
                 frameRef.current = null;
-                if (nextViewportRef.current) onViewportChange(nextViewportRef.current);
+                const nextViewport = nextViewportRef.current;
+                nextViewportRef.current = null;
+                if (nextViewport) onViewportChange(nextViewport);
             });
         };
 

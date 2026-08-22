@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import assert from "node:assert/strict";
 import test from "node:test";
+import os from "node:os";
+import path from "node:path";
 
 import { CanvasSession } from "./session.js";
 
@@ -107,6 +110,35 @@ test("图片附件只允许发起 turn 的标签页读取和落入画布", async
     assert.throws(() => session.getTurnAttachment("second", "attachment-1"), /发起标签页/);
     assert.equal(first.event("tool_call"), undefined);
     assert.equal(second.event("tool_call"), undefined);
+});
+
+test("本机 Skill 图片通过短期资源写入发起画布且不把路径发给网页", async (t) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "canvas-local-image-test-"));
+    const filePath = path.join(directory, "result.png");
+    await writeFile(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+
+    const session = new CanvasSession();
+    const first = connect(session, "first");
+    t.after(() => first.close());
+    session.updateState(snapshot("canvas-first"), "first");
+    session.bindClient("first");
+
+    const result = session.callTool("canvas_create_local_image_nodes", { paths: [filePath], x: 120, y: 240 });
+    const call = await waitForEvent(first, "tool_call");
+    const input = field(call, "input") as Record<string, unknown>;
+    const nodes = input.nodes as Array<Record<string, unknown>>;
+    assert.equal(field(call, "name"), "canvas_create_local_image_nodes");
+    assert.equal(nodes.length, 1);
+    assert.equal("path" in nodes[0], false);
+    assert.deepEqual(nodes[0].position, { x: 120, y: 240 });
+    const asset = session.getLocalImage("first", String(nodes[0].localImageId));
+    assert.equal(asset.path, filePath);
+
+    session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
+    const created = (await result) as { nodes: Array<{ id: string; localImageId: string; title: string }> };
+    assert.equal(created.nodes[0].id, nodes[0].id);
+    assert.equal(created.nodes[0].title, "result.png");
 });
 
 test("tool result is accepted only from the request client", async (t) => {
@@ -221,7 +253,7 @@ test("new clients receive the current Codex state and later updates", (t) => {
     t.after(() => client.close());
 
     const hello = client.event("hello");
-    assert.equal(field(hello, "protocolVersion"), 6);
+    assert.equal(field(hello, "protocolVersion"), 7);
     assert.deepEqual(field(hello, "workspace"), { activeThreadId: "thread-2" });
     assert.deepEqual(field(hello, "conversation"), { revision: 1, conversationId: "thread-2", threadId: "thread-2", status: "ready", mcpStatuses: {} });
     assert.deepEqual(field(hello, "codex"), { busy: true, threadId: "thread-2", turnId: "turn-1" });
@@ -545,6 +577,15 @@ function snapshot(projectId: string) {
 /** 安全读取测试对象字段。 */
 function field(value: unknown, key: string) {
     return value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+async function waitForEvent(response: FakeSseResponse, type: string) {
+    for (let index = 0; index < 20; index += 1) {
+        const event = response.event(type);
+        if (event) return event;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error(`未收到 SSE 事件：${type}`);
 }
 
 /** 模拟 Node SSE 响应并提供事件读取能力。 */

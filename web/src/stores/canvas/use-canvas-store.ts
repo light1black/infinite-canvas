@@ -3,7 +3,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import i18n from "@/i18n";
-import { localForageStorage } from "@/lib/localforage-storage";
+import { createPersistedEnvelope, localForageStorage, parsePersistedEnvelope } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
@@ -38,12 +38,52 @@ const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+let queuedPersistName = "";
+let queuedPersistEnvelope = "";
+let persistWriteTail: Promise<void> = Promise.resolve();
+let latestPersistResult: Promise<string | null> = Promise.resolve(null);
+
+function writeQueuedPersist() {
+    if (!queuedPersistName || !queuedPersistEnvelope) return latestPersistResult;
+    const name = queuedPersistName;
+    const envelope = queuedPersistEnvelope;
+    queuedPersistName = "";
+    queuedPersistEnvelope = "";
+    const write = persistWriteTail.then(async () => {
+        await localForageStorage.setItem(`${name}:backup`, envelope);
+        await localForageStorage.setItem(name, envelope);
+        return new Date().toISOString();
+    });
+    persistWriteTail = write.then(
+        () => undefined,
+        () => undefined,
+    );
+    latestPersistResult = write;
+    return write;
+}
+
+export function flushCanvasPersistence() {
+    if (saveTimer !== null) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        void writeQueuedPersist().catch(() => undefined);
+    }
+    return latestPersistResult;
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
         const value = await localForageStorage.getItem(name);
-        if (!value) return null;
-        const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
+        const backup = await localForageStorage.getItem(`${name}:backup`);
+        const stateValue = parsePersistedEnvelope(value) || parsePersistedEnvelope(backup) || value;
+        if (!stateValue) return null;
+        let parsed: StorageValue<CanvasStore>;
+        try {
+            parsed = JSON.parse(stateValue) as StorageValue<CanvasStore>;
+            if (!parsed.state || !Array.isArray((parsed.state as PersistedCanvasState).projects)) return null;
+        } catch {
+            return null;
+        }
         queuedPersistState = parsed.state as PersistedCanvasState;
         return parsed;
     },
@@ -51,10 +91,12 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;
         queuedPersistState = nextState;
-        if (saveTimer) clearTimeout(saveTimer);
+        queuedPersistName = name;
+        queuedPersistEnvelope = JSON.stringify(createPersistedEnvelope(JSON.stringify(value)));
+        if (saveTimer !== null) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
             saveTimer = null;
-            void localForageStorage.setItem(name, JSON.stringify(value));
+            void writeQueuedPersist().catch((error) => console.error("Failed to persist canvas state", error));
         }, 400);
     },
     removeItem: (name) => localForageStorage.removeItem(name),

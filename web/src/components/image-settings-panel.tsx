@@ -41,9 +41,10 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     quickCount?: number;
+    showCount?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, showCount = true }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
@@ -132,7 +133,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
                     </span>
                 </div>
-                <div className="space-y-2.5">
+                {showCount ? <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.count")}</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
                         {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
@@ -142,7 +143,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                         <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
                     </div>
-                </div>
+                </div> : null}
             </div>
         </ImageSettingsTheme>
     );
@@ -158,6 +159,22 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
         >
             {children}
         </ConfigProvider>
+    );
+}
+
+export function GenerationCountSetting({ count, maxCount = 15, quickCount = 10, theme, label, itemLabel, onChange }: { count: number; maxCount?: number; quickCount?: number; theme: CanvasTheme; label: string; itemLabel: (count: number) => string; onChange: (count: number) => void }) {
+    return (
+        <div className="space-y-2.5">
+            <SettingTitle color={theme.node.muted}>{label}</SettingTitle>
+            <div className="grid grid-cols-4 gap-2.5">
+                {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
+                    <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onChange(value)}>
+                        {itemLabel(value)}
+                    </OptionPill>
+                ))}
+                <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onChange(value || 1)} />
+            </div>
+        </div>
     );
 }
 
@@ -212,7 +229,7 @@ function DimensionInput({ prefix, value, disabled, theme, alignToStep, onChange 
     );
 }
 
-function CountInput({ value, max, theme, onChange }: { value: number; max: number; theme: CanvasTheme; onChange: (value: number | null) => void }) {
+export function CountInput({ value, max, theme, onChange }: { value: number; max: number; theme: CanvasTheme; onChange: (value: number | null) => void }) {
     return (
         <label className="col-span-2 flex h-9 overflow-hidden rounded-full border text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
             <input
@@ -241,7 +258,7 @@ function AspectIcon({ type, width, height, color }: { type: string; width: numbe
     );
 }
 
-function SettingTitle({ children, color }: { children: string; color: string }) {
+export function SettingTitle({ children, color }: { children: string; color: string }) {
     return (
         <div className="text-xs font-medium" style={{ color }}>
             {children}

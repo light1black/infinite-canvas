@@ -3,11 +3,11 @@ import i18n from "@/i18n";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
+import { interruptInFlightGenerationTasks } from "@/lib/canvas/canvas-generation-task";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
-import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { ReferenceImage } from "@/types/image";
-import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
+import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
 export function imageExtension(dataUrl: string) {
     return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
@@ -83,6 +83,13 @@ export function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
+export function getNodeGenerationCount(node: CanvasNodeData | undefined, mode: CanvasGenerationMode) {
+    if (node?.type !== CanvasNodeType.Config) return 1;
+    const legacyImageCount = mode === "image" ? node.metadata?.count : undefined;
+    const count = mode === "text" ? node.metadata?.textCount : mode === "image" ? node.metadata?.imageCount ?? legacyImageCount : mode === "video" ? node.metadata?.videoCount : node.metadata?.audioCount;
+    return getGenerationCount(String(count ?? 1));
+}
+
 export function getInputSummary(inputs: NodeGenerationInput[]) {
     return {
         textCount: inputs.filter((input) => input.type === "text").length,
@@ -92,7 +99,7 @@ export function getInputSummary(inputs: NodeGenerationInput[]) {
     };
 }
 
-export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
+export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasGenerationMode): AiConfig {
     return {
         ...config,
         model: resolveModelForCapability(config, node?.metadata?.model, mode),
@@ -108,24 +115,12 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+        count: String(getNodeGenerationCount(node, mode)),
     };
 }
 
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
-    return nodes.map((node) =>
-        node.metadata?.status === "loading"
-            ? {
-                  ...node,
-                  metadata: {
-                      ...node.metadata,
-                      status: "error" as const,
-                      errorDetails: i18n.t("canvas.generation.interrupted"),
-                      images: node.metadata.images?.map((image) => (image.status === "loading" ? { ...image, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted") } : image)),
-                  },
-              }
-            : node,
-    );
+    return interruptInFlightGenerationTasks(nodes, i18n.t("canvas.generation.interrupted"));
 }
 
 export function isGenerationCanceled(error: unknown) {

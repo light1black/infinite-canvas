@@ -71,7 +71,7 @@ const MAX_ATTACHMENT_PAYLOAD_BYTES = 28 * 1024 * 1024;
 const MESSAGE_PREVIEW_LONG_EDGE = 192;
 const MESSAGE_PREVIEW_MAX_LENGTH = 500_000;
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
-const AGENT_PROTOCOL_VERSION = 6;
+const AGENT_PROTOCOL_VERSION = 7;
 const HISTORY_RETRY_DELAYS_MS = [0, 150, 350, 700, 1200];
 const AGENT_REASONING_EFFORTS = new Set<AgentReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const rt = (key: string, options?: Record<string, unknown>) => i18n.t(`agent.runtime.${key}`, options);
@@ -814,7 +814,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             return;
         }
         try {
-            const input: { ops?: CanvasAgentOp[]; path?: string } = payload.input || {};
+            const input: { ops?: CanvasAgentOp[]; path?: string; nodes?: unknown; connectToNodeId?: string } = payload.input || {};
             addEventLog(toolName(payload.name), payload, payload);
             let result: unknown;
             let appliedOps = input.ops || [];
@@ -831,6 +831,12 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 const context = canvasContextRef.current;
                 if (!context) throw new Error(rt("openCanvasFirst"));
                 appliedOps = await attachmentNodeOps(endpoint, token, clientIdRef.current, payload.input?.nodes);
+                result = context.applyOps(appliedOps);
+                await postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
+            } else if (payload.name === "canvas_create_local_image_nodes") {
+                const context = canvasContextRef.current;
+                if (!context) throw new Error(rt("openCanvasFirst"));
+                appliedOps = await localImageNodeOps(endpoint, token, clientIdRef.current, input.nodes, input.connectToNodeId);
                 result = context.applyOps(appliedOps);
                 await postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
             } else {
@@ -1519,6 +1525,39 @@ async function attachmentNodeOps(endpoint: string, token: string, clientId: stri
             };
         }),
     );
+}
+
+async function localImageNodeOps(endpoint: string, token: string, clientId: string, value: unknown, connectToNodeId?: string): Promise<CanvasAgentOp[]> {
+    const nodes = Array.isArray(value) ? value : [];
+    if (!nodes.length) throw new Error(rt("noLocalImages"));
+    const imageOps = await Promise.all(
+        nodes.map(async (value) => {
+            const item = value as { id?: unknown; localImageId?: unknown; title?: unknown; position?: unknown };
+            const id = String(item.id || "");
+            const localImageId = String(item.localImageId || "");
+            if (!id || !localImageId) throw new Error(rt("invalidLocalImageNode"));
+            const res = await fetch(`${endpoint}/agent/local-images/${encodeURIComponent(localImageId)}?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`);
+            if (!res.ok) {
+                const body = (await res.json().catch(() => null)) as { error?: string } | null;
+                throw new Error(body?.error || rt("localImageReadFailed"));
+            }
+            const image = await uploadImage(await res.blob());
+            const size = fitNodeSize(image.width, image.height);
+            const position = item.position && typeof item.position === "object" ? (item.position as { x?: unknown; y?: unknown }) : {};
+            return {
+                type: "add_node" as const,
+                id,
+                nodeType: "image" as const,
+                title: String(item.title || rt("generatedImageName", { index: 1 })),
+                position: { x: Number(position.x) || 0, y: Number(position.y) || 0 },
+                width: size.width,
+                height: size.height,
+                metadata: imageMetadata(image),
+            };
+        }),
+    );
+    if (!connectToNodeId) return imageOps;
+    return [...imageOps, ...imageOps.map((op) => ({ type: "connect_nodes" as const, fromNodeId: connectToNodeId, toNodeId: op.id }))];
 }
 
 function createId() {

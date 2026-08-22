@@ -8,6 +8,7 @@ import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-referen
 
 export type NodeGenerationContext = {
     prompt: string;
+    sourceNodeIds: string[];
     referenceImages: ReferenceImage[];
     referenceVideos: ReferenceVideo[];
     referenceAudios: ReferenceAudio[];
@@ -44,6 +45,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 
     return {
         prompt: upstreamText ? `${prompt}\n\n${upstreamText}` : prompt,
+        sourceNodeIds: inputs.map((input) => input.nodeId),
         referenceImages,
         referenceVideos,
         referenceAudios,
@@ -57,6 +59,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const selectedInputs: NodeGenerationInput[] = [];
+    const selectedNodeIds: string[] = [];
     const labelByNodeId = new Map<string, string>();
     const textBlocks: string[] = [];
     const counts = { image: 0, video: 0, audio: 0, text: 0 };
@@ -74,6 +77,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
             if (!label) {
                 label = generationLabel(input.type, counts[input.type]++);
                 labelByNodeId.set(input.nodeId, label);
+                selectedNodeIds.push(input.nodeId);
                 if (input.type === "text") textBlocks.push(`【${label}】\n${input.text || ""}`);
                 else selectedInputs.push(input);
             }
@@ -91,6 +95,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     if (!hasToken) {
         return {
             prompt,
+            sourceNodeIds: [],
             referenceImages: [],
             referenceVideos: [],
             referenceAudios: [],
@@ -103,6 +108,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
 
     return {
         prompt: nextPrompt,
+        sourceNodeIds: selectedNodeIds,
         referenceImages,
         referenceVideos,
         referenceAudios,

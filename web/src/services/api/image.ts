@@ -8,6 +8,8 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { requestAgentComfyUiTask } from "./agent-comfyui";
+import { requestAgentImageTask } from "./agent-image";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -95,6 +97,12 @@ type GeminiPayload = {
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 type RequestOptions = { signal?: AbortSignal };
+export type ImageGenerationResult = {
+    id: string;
+    dataUrl: string;
+    mode?: "simulated" | "openai-compatible" | "comfyui";
+    fallbackReason?: string;
+};
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -304,7 +312,6 @@ function readApiErrorMessage(value: unknown): string {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return apiText("requestCanceled");
     if (axios.isAxiosError(error)) {
-        if (!error.response && error.code === "ERR_NETWORK") return apiText("corsRequired");
         const responseData = error.response?.data;
         // Prefer the API error from the response body.
         const apiMsg = readApiErrorMessage(responseData);
@@ -714,7 +721,7 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<ImageGenerationResult[]> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -744,6 +751,24 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
+    if (requestConfig.apiFormat === "openai") {
+        const quality = normalizeQuality(config.quality);
+        const result = await requestAgentImageTask({
+            prompt: withSystemPrompt(requestConfig, prompt),
+            baseUrl: requestConfig.baseUrl,
+            apiKey: requestConfig.apiKey,
+            model: requestConfig.model,
+            count: n,
+            size: resolveRequestSize(quality, config.size),
+            quality,
+            background: normalizeBackground(config.background),
+        }, options?.signal);
+        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl, mode: result.mode, fallbackReason: result.fallbackReason }));
+    }
+    if (requestConfig.apiFormat === "comfyui") {
+        const result = await requestAgentComfyUiTask({ prompt: withSystemPrompt(requestConfig, prompt), count: n }, options?.signal);
+        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl, mode: result.mode, fallbackReason: result.fallbackReason }));
+    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
@@ -757,7 +782,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 ...(background ? { background } : {}),
-                response_format: "b64_json",
+                ...(supportsResponseFormat(requestConfig.model) ? { response_format: "b64_json" } : {}),
                 output_format: IMAGE_OUTPUT_FORMAT,
             },
             {
@@ -772,7 +797,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions): Promise<ImageGenerationResult[]> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
@@ -806,6 +831,56 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         }
     }
 
+    if ((requestConfig.apiFormat as string) === "ark") {
+        if (mask) throw new Error(apiText("maskModelUnsupported"));
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
+        const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        try {
+            const response = await axios.post<ImageApiResponse>(
+                aiApiUrl(requestConfig, "/images/generations"),
+                {
+                    model: requestConfig.model,
+                    prompt: withSystemPrompt(requestConfig, requestPrompt),
+                    n,
+                    ...(supportsResponseFormat(requestConfig.model) ? { response_format: "b64_json" } : {}),
+                    output_format: IMAGE_OUTPUT_FORMAT,
+                    image: refs,
+                    ...(quality ? { quality } : {}),
+                    ...(requestSize ? { size: requestSize } : {}),
+                    ...(background ? { background } : {}),
+                },
+                {
+                    headers: aiHeaders(requestConfig, "application/json"),
+                    signal: options?.signal,
+                },
+            );
+            return parseImagePayload(response.data);
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+
+    if (requestConfig.apiFormat === "openai") {
+        if (mask) throw new Error(apiText("maskModelUnsupported"));
+        const quality = normalizeQuality(config.quality);
+        const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const result = await requestAgentImageTask({
+            prompt: withSystemPrompt(requestConfig, requestPrompt),
+            images,
+            baseUrl: requestConfig.baseUrl,
+            apiKey: requestConfig.apiKey,
+            model: requestConfig.model,
+            count: n,
+            size: resolveRequestSize(quality, config.size),
+            quality,
+            background: normalizeBackground(config.background),
+        }, options?.signal);
+        return result.images.map((dataUrl) => ({ id: nanoid(), dataUrl, mode: result.mode, fallbackReason: result.fallbackReason }));
+    }
+    if ((requestConfig.apiFormat as string) === "comfyui") throw new Error(i18n.t("imageWorkbench.comfyuiReferencesUnsupported"));
+
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
@@ -813,7 +888,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
     formData.set("n", String(n));
-    formData.set("response_format", "b64_json");
+    if (supportsResponseFormat(requestConfig.model)) formData.set("response_format", "b64_json");
     formData.set("output_format", IMAGE_OUTPUT_FORMAT);
     if (quality) {
         formData.set("quality", quality);
@@ -835,6 +910,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
+}
+
+function supportsResponseFormat(model: string) {
+    return !/^gpt-image(?:-|$)/i.test(model.trim());
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
@@ -877,6 +956,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
+        if ((config.apiFormat as string) === "comfyui") return ["comfyui-workflow", "video-simulation"];
         if (config.apiFormat === "gemini") {
             const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
             validateGeminiPayload(response.data);

@@ -4,6 +4,8 @@ import fs from "node:fs";
 export type ImageTaskInput = {
     prompt: string;
     images?: string[];
+    baseUrl?: string;
+    apiKey?: string;
     model?: string;
     size?: string;
     quality?: string;
@@ -15,15 +17,18 @@ export type ImageTaskResult = {
     taskId: string;
     status: "succeeded";
     mode: "simulated" | "openai-compatible";
+    fallbackReason?: string;
     model: string;
     images: string[];
 };
 
+const SIMULATION_FALLBACK_REASON = "未配置 OPENAI_COMPATIBLE_IMAGE_API_KEY，当前返回模拟图片";
+
 type ImageApiPayload = { data?: Array<{ b64_json?: string; url?: string }>; error?: { message?: string }; message?: string };
 
-/** Run one OpenAI-compatible image task, using a deterministic mock when no local key is configured. */
+/** Run one OpenAI-compatible image task, using a deterministic mock when neither the request nor local settings provide a key. */
 export async function runImageTask(input: ImageTaskInput, signal?: AbortSignal): Promise<ImageTaskResult> {
-    const settings = loadImageSettings();
+    const settings = loadImageSettings(input);
     const prompt = input.prompt?.trim();
     if (!prompt) throw new Error("图片任务提示词不能为空");
     const taskId = `image-task-${crypto.randomUUID()}`;
@@ -34,6 +39,7 @@ export async function runImageTask(input: ImageTaskInput, signal?: AbortSignal):
             taskId,
             status: "succeeded",
             mode: "simulated",
+            fallbackReason: SIMULATION_FALLBACK_REASON,
             model,
             images: Array.from({ length: count }, (_, index) => simulatedImage(prompt, index + 1, count)),
         };
@@ -46,12 +52,13 @@ export async function runImageTask(input: ImageTaskInput, signal?: AbortSignal):
     return { taskId, status: "succeeded", mode: "openai-compatible", model, images: parseImages(payload) };
 }
 
-function loadImageSettings() {
+function loadImageSettings(input: Pick<ImageTaskInput, "apiKey" | "baseUrl"> = {}) {
     const file = new URL("../../.env.local", import.meta.url);
     const values = fs.existsSync(file) ? parseEnv(fs.readFileSync(file, "utf8")) : {};
+    const requestApiKey = input.apiKey?.trim() || "";
     return {
-        apiKey: process.env.OPENAI_COMPATIBLE_IMAGE_API_KEY || process.env.OPENAI_API_KEY || values.OPENAI_COMPATIBLE_IMAGE_API_KEY || values.OPENAI_API_KEY || "",
-        baseUrl: process.env.OPENAI_COMPATIBLE_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || values.OPENAI_COMPATIBLE_IMAGE_BASE_URL || values.OPENAI_BASE_URL || "https://api.openai.com",
+        apiKey: requestApiKey || process.env.OPENAI_COMPATIBLE_IMAGE_API_KEY || process.env.OPENAI_API_KEY || values.OPENAI_COMPATIBLE_IMAGE_API_KEY || values.OPENAI_API_KEY || "",
+        baseUrl: requestApiKey && input.baseUrl?.trim() || process.env.OPENAI_COMPATIBLE_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || values.OPENAI_COMPATIBLE_IMAGE_BASE_URL || values.OPENAI_BASE_URL || "https://api.openai.com",
         model: process.env.OPENAI_COMPATIBLE_IMAGE_MODEL || values.OPENAI_COMPATIBLE_IMAGE_MODEL || "gpt-image-2",
     };
 }
@@ -61,7 +68,7 @@ async function requestImageGeneration(settings: ReturnType<typeof loadImageSetti
         model: input.model,
         prompt: input.prompt,
         n: input.count,
-        response_format: "b64_json",
+        ...responseFormat(input.model),
         ...(input.size ? { size: input.size } : {}),
         ...(input.quality ? { quality: input.quality } : {}),
         ...(input.background ? { background: input.background } : {}),
@@ -73,13 +80,24 @@ async function requestImageEdit(settings: ReturnType<typeof loadImageSettings>, 
     form.set("model", input.model);
     form.set("prompt", input.prompt);
     form.set("n", String(input.count));
-    form.set("response_format", "b64_json");
+    if (supportsResponseFormat(input.model)) form.set("response_format", "b64_json");
     if (input.size) form.set("size", input.size);
     if (input.quality) form.set("quality", input.quality);
     if (input.background) form.set("background", input.background);
-    for (const [index, image] of input.images.entries()) form.append("image", await imageBlob(image, signal), `reference-${index + 1}.png`);
+    for (const [index, image] of input.images.entries()) {
+        const file = await imageFile(image, signal);
+        form.append("image", file.blob, `reference-${index + 1}.${file.extension}`);
+    }
     const response = await fetch(imageUrl(settings.baseUrl, "/images/edits"), { method: "POST", headers: { authorization: `Bearer ${settings.apiKey}` }, body: form, signal });
     return readResponse(response);
+}
+
+export function supportsResponseFormat(model: string) {
+    return !/^gpt-image(?:-|$)/i.test(model.trim());
+}
+
+function responseFormat(model: string) {
+    return supportsResponseFormat(model) ? { response_format: "b64_json" } : {};
 }
 
 async function requestJson(settings: ReturnType<typeof loadImageSettings>, url: string, body: unknown, signal?: AbortSignal) {
@@ -104,16 +122,39 @@ function parseImages(payload: ImageApiPayload) {
     return images;
 }
 
-async function imageBlob(value: string, signal?: AbortSignal) {
+async function imageFile(value: string, signal?: AbortSignal) {
+    let bytes: Uint8Array;
+    let declaredMime = "";
     if (!value.startsWith("data:")) {
         const response = await fetch(value, { signal });
         if (!response.ok) throw new Error(`参考图读取失败 (${response.status})`);
-        return response.blob();
+        declaredMime = response.headers.get("content-type") || "";
+        bytes = new Uint8Array(await response.arrayBuffer());
+    } else {
+        const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(value);
+        if (!match) throw new Error("参考图 Data URL 无效");
+        declaredMime = match[1] || "";
+        bytes = new Uint8Array(match[2] ? Buffer.from(match[3], "base64") : Buffer.from(decodeURIComponent(match[3])));
     }
-    const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(value);
-    if (!match) throw new Error("参考图 Data URL 无效");
-    const bytes = match[2] ? Buffer.from(match[3], "base64") : Buffer.from(decodeURIComponent(match[3]));
-    return new Blob([bytes], { type: match[1] || "image/png" });
+    const mimeType = detectImageMime(bytes) || declaredMime.split(";", 1)[0].trim().toLowerCase() || "image/png";
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    return { blob: new Blob([buffer], { type: mimeType }), extension: imageExtension(mimeType) };
+}
+
+function detectImageMime(bytes: Uint8Array) {
+    if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return "image/png";
+    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+    const signature = String.fromCharCode(...bytes.slice(0, 12));
+    if (signature.startsWith("GIF87a") || signature.startsWith("GIF89a")) return "image/gif";
+    if (signature.startsWith("RIFF") && signature.slice(8, 12) === "WEBP") return "image/webp";
+    if (signature.slice(4, 8) === "ftyp" && ["avif", "avis"].includes(signature.slice(8, 12))) return "image/avif";
+    return "";
+}
+
+function imageExtension(mimeType: string) {
+    if (mimeType === "image/jpeg") return "jpg";
+    const subtype = mimeType.split("/", 2)[1]?.split("+", 1)[0] || "png";
+    return /^[a-z0-9]+$/i.test(subtype) ? subtype.toLowerCase() : "png";
 }
 
 function imageUrl(baseUrl: string, path: string) {

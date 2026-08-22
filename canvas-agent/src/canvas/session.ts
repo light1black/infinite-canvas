@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import type { ServerResponse } from "node:http";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 
 import type { AgentAttachment } from "../agent/types.js";
 import { logger } from "../utils/logger.js";
@@ -10,6 +12,7 @@ import type { CanvasSnapshot } from "./types.js";
 
 type PendingRequest = { clientId: string; resolve: (value: unknown) => void; reject: (error: Error) => void };
 type TurnAttachment = { clientId: string; id: string; name: string; type: string; size: number; width: number; height: number; dataUrl: string };
+type LocalImageAsset = { clientId: string; id: string; name: string; path: string; createdAt: number };
 type ReplayEvent = { type: string; payload: Record<string, unknown> };
 export type CodexState = { busy: boolean; threadId: string; turnId: string };
 export type McpStartupState = "starting" | "ready" | "failed" | "cancelled";
@@ -23,7 +26,7 @@ export type ConversationState = {
     error?: string;
 };
 type McpInventoryItem = { name: string; authStatus?: string };
-export const AGENT_PROTOCOL_VERSION = 6;
+export const AGENT_PROTOCOL_VERSION = 7;
 
 const SITE_TOOLS = new Set<ToolName>([
     "site_navigate",
@@ -46,6 +49,7 @@ export class CanvasSession {
     private pendingApprovals = new Map<string, Record<string, unknown>>();
     private canvasStates = new Map<string, CanvasSnapshot>();
     private turnAttachments = new Map<string, TurnAttachment>();
+    private localImageAssets = new Map<string, LocalImageAsset>();
     private codexReplayEvents = new Map<string, ReplayEvent>();
     private codexReplayActiveItems = new Set<string>();
     private codexMutationBusy = false;
@@ -371,6 +375,14 @@ export class CanvasSession {
         return attachment;
     }
 
+    /** 获取已由 MCP 工具校验、且属于指定网页的本机图片。 */
+    getLocalImage(clientId: string, assetId: string) {
+        const asset = this.localImageAssets.get(assetId);
+        if (!asset) throw new Error("找不到本机图片资源");
+        if (asset.clientId !== clientId) throw new Error("本机图片资源不属于当前画布");
+        return asset;
+    }
+
     /** 接收网页返回的工具调用结果。 */
     resolveResult(clientId: string, body: { requestId?: string; error?: string; result?: unknown }) {
         const item = body.requestId ? this.pending.get(body.requestId) : null;
@@ -439,7 +451,8 @@ export class CanvasSession {
     /** 校验工具参数并将调用分派到当前目标网页。 */
     async callTool(name: unknown, rawInput: unknown) {
         if (!isToolName(name)) throw new Error(`未知工具：${String(name)}`);
-        logger.info("MCP tool called", { name, input: rawInput, targetClientId: this.targetClientId });
+        const paths = recordValue(rawInput).paths;
+        logger.info("MCP tool called", { name, input: name === "canvas_create_local_image_nodes" ? { pathCount: Array.isArray(paths) ? paths.length : 0 } : rawInput, targetClientId: this.targetClientId });
         const input = parseToolInput(name, rawInput) as Record<string, unknown>;
         if (SITE_TOOLS.has(name)) {
             if (!this.clients.size) throw new Error("当前没有已连接网页");
@@ -453,6 +466,7 @@ export class CanvasSession {
             return { nodes: (this.canvasState?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
         }
         if (name === "canvas_create_attachment_nodes") return await this.createAttachmentNodes(input as { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" });
+        if (name === "canvas_create_local_image_nodes") return await this.createLocalImageNodes(input as { paths: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column"; connectToNodeId?: string });
         if (!this.clients.size) throw new Error("当前没有已连接画布");
         const request = buildCanvasToolRequest(name, input, this.canvasState);
         return await this.requestCanvasTool(request.name, request.input);
@@ -483,6 +497,43 @@ export class CanvasSession {
         });
         await this.requestCanvasTool("canvas_create_attachment_nodes", { nodes });
         return { nodes: nodes.map(({ id, attachmentId, title }) => ({ id, attachmentId, title })) };
+    }
+
+    /** 将 Skill 或本机命令输出注册为短期资源，再交给网页写入 IndexedDB 画布。 */
+    private async createLocalImageNodes(input: { paths: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column"; connectToNodeId?: string }) {
+        const clientId = this.targetClientId;
+        if (!this.clients.has(clientId)) throw new Error("当前没有已连接画布");
+        if (input.connectToNodeId && !(this.canvasState?.nodes || []).some((node) => node.id === input.connectToNodeId)) throw new Error("要连接的画布节点不存在");
+        const x = Number(input.x ?? nextCanvasX(this.canvasState));
+        const y = Number(input.y ?? 0);
+        const gap = Number(input.gap ?? 40);
+        const direction = input.direction || "row";
+        this.purgeLocalImageAssets();
+        const files = await Promise.all(input.paths.map(async (filePath) => {
+            if (!path.isAbsolute(filePath) || !/\.(?:avif|gif|jpe?g|png|webp)$/i.test(filePath)) throw new Error("本机图片路径必须是受支持格式的绝对路径");
+            const info = await stat(filePath);
+            if (!info.isFile() || info.size <= 0) throw new Error("本机图片文件不存在或为空");
+            return filePath;
+        }));
+        const nodes = files.map((filePath, index) => {
+            const localImageId = `local-image-${crypto.randomUUID()}`;
+            this.localImageAssets.set(localImageId, { clientId, id: localImageId, name: path.basename(filePath), path: filePath, createdAt: Date.now() });
+            return {
+                id: `image-${crypto.randomUUID()}`,
+                localImageId,
+                title: path.basename(filePath),
+                position: { x: direction === "row" ? x + index * (640 + gap) : x, y: direction === "column" ? y + index * (640 + gap) : y },
+            };
+        });
+        await this.requestCanvasTool("canvas_create_local_image_nodes", { nodes, connectToNodeId: input.connectToNodeId });
+        return { nodes: nodes.map(({ id, localImageId, title }) => ({ id, localImageId, title })) };
+    }
+
+    private purgeLocalImageAssets() {
+        const cutoff = Date.now() - 60 * 60 * 1000;
+        this.localImageAssets.forEach((asset, id) => {
+            if (asset.createdAt < cutoff) this.localImageAssets.delete(id);
+        });
     }
 
     /** 向目标网页发送工具请求并等待调用结果。 */

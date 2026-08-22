@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ImageSettingsTheme } from "@/components/image-settings-panel";
+import { GenerationCountSetting, ImageSettingsTheme } from "@/components/image-settings-panel";
 import { audioFormatOptions, audioSpeedLabel, audioVoiceOptions, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -12,13 +12,14 @@ type AudioSettingKey = "audioVoice" | "audioFormat" | "audioSpeed" | "audioInstr
 
 type AudioSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: AudioSettingKey, value: string) => void;
+    onConfigChange: (key: AudioSettingKey | "count", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    showCount?: boolean;
 };
 
-export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: AudioSettingsPanelProps) {
+export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", showCount = false }: AudioSettingsPanelProps) {
     const { t } = useTranslation();
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
@@ -28,6 +29,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.audio.title")}</div> : null}
+                {showCount ? <GenerationCountSetting count={Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)))} theme={theme} label={t("settingsPanels.audio.count")} itemLabel={(value) => t("settingsPanels.audio.audios", { count: value })} onChange={(value) => onConfigChange("count", String(value))} /> : null}
                 <SettingGroup title={t("settingsPanels.audio.voice")} color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
                         {audioVoiceOptions.map((item) => (

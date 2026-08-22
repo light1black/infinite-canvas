@@ -9,10 +9,26 @@ const ENV_KEYS = ["OPENAI_COMPATIBLE_IMAGE_API_KEY", "OPENAI_API_KEY", "OPENAI_C
 test("未配置密钥时返回指定数量的模拟图片", async () => withImageEnv({}, async () => {
     const result = await runImageTask({ prompt: "蓝色几何海报", count: 2 });
     assert.equal(result.mode, "simulated");
+    assert.equal(result.fallbackReason, "未配置 OPENAI_COMPATIBLE_IMAGE_API_KEY，当前返回模拟图片");
     assert.equal(result.model, "gpt-image-2");
     assert.equal(result.images.length, 2);
     assert.ok(result.images.every((image) => image.startsWith("data:image/svg+xml;base64,")));
 }));
+
+test("网页渠道配置可通过本地 Agent 调用 OpenAI 兼容图片接口", async () => {
+    let authorization = "";
+    await withServer(async (baseUrl) => withImageEnv({}, async () => {
+        serverHandler = async (request, response) => {
+            authorization = String(request.headers.authorization || "");
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }));
+        };
+        const result = await runImageTask({ prompt: "网页渠道测试", baseUrl, apiKey: "browser-channel-key", model: "gpt-image-2" });
+        assert.equal(result.mode, "openai-compatible");
+        assert.equal(result.fallbackReason, undefined);
+    }));
+    assert.equal(authorization, "Bearer browser-channel-key");
+});
 
 test("OpenAI 兼容文生图只使用 Agent 本地地址和配置", async () => {
     const requests: Array<{ url: string; authorization: string; body: string }> = [];
@@ -35,6 +51,19 @@ test("OpenAI 兼容文生图只使用 Agent 本地地址和配置", async () => 
     assert.deepEqual(JSON.parse(requests[0]?.body || "{}"), { model: "local-image-model", prompt: "测试", n: 2, response_format: "b64_json", size: "1024x1024", quality: "high", background: "transparent" });
 });
 
+test("gpt-image 模型不发送不兼容的 response_format", async () => {
+    let body = "";
+    await withServer(async (baseUrl) => withImageEnv({ OPENAI_COMPATIBLE_IMAGE_API_KEY: "test-key", OPENAI_COMPATIBLE_IMAGE_BASE_URL: baseUrl }, async () => {
+        serverHandler = async (request, response) => {
+            body = await readBody(request);
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }));
+        };
+        await runImageTask({ prompt: "严格协议测试", model: "gpt-image-2" });
+    }));
+    assert.equal(JSON.parse(body).response_format, undefined);
+});
+
 test("包含参考图时调用 OpenAI 兼容图生图接口", async () => {
     let requestUrl = "";
     let contentType = "";
@@ -54,6 +83,20 @@ test("包含参考图时调用 OpenAI 兼容图生图接口", async () => {
     assert.match(contentType, /^multipart\/form-data; boundary=/);
     assert.match(body, /name="prompt"\r\n\r\n修改参考图/);
     assert.match(body, /name="image"; filename="reference-1.png"/);
+});
+
+test("图生图上传时按真实文件头修正参考图 MIME 和扩展名", async () => {
+    let body = "";
+    await withServer(async (baseUrl) => withImageEnv({ OPENAI_COMPATIBLE_IMAGE_API_KEY: "test-key", OPENAI_COMPATIBLE_IMAGE_BASE_URL: baseUrl }, async () => {
+        serverHandler = async (request, response) => {
+            body = await readBody(request);
+            response.setHeader("content-type", "application/json");
+            response.end(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }));
+        };
+        await runImageTask({ prompt: "真实 JPEG 参考图", images: ["data:image/png;base64,/9j/2Q=="] });
+    }));
+    assert.match(body, /filename="reference-1\.jpg"/);
+    assert.match(body, /Content-Type: image\/jpeg/);
 });
 
 let serverHandler: (request: http.IncomingMessage, response: http.ServerResponse) => Promise<void> = async (_request, response) => response.end();

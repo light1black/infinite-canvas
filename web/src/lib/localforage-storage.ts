@@ -32,3 +32,26 @@ export const localForageStorage: StateStorage = {
         }
     },
 };
+
+export type PersistedEnvelope = {
+    app: "infinite-canvas";
+    version: 1;
+    writtenAt: string;
+    state: string;
+};
+
+export function createPersistedEnvelope(state: string, writtenAt = new Date().toISOString()): PersistedEnvelope {
+    return { app: "infinite-canvas", version: 1, writtenAt, state };
+}
+
+export function parsePersistedEnvelope(value: string | null): string | null {
+    if (!value) return null;
+    try {
+        const parsed = JSON.parse(value) as Partial<PersistedEnvelope>;
+        if (parsed.app !== "infinite-canvas" || parsed.version !== 1 || typeof parsed.state !== "string") return null;
+        JSON.parse(parsed.state);
+        return parsed.state;
+    } catch {
+        return null;
+    }
+}

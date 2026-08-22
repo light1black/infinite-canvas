@@ -40,7 +40,11 @@ Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接
 
 ## 本地生成
 
-图片的 OpenAI 兼容接口与 ComfyUI 工作流配置都只从 `canvas-agent/.env.local` 读取，浏览器不会保存这些密钥。可复制 `.env.example` 为 `.env.local` 后按需填写。
+OpenAI 兼容图片接口优先使用网页当前渠道的地址和 API Key，并通过仅监听本机、带 token 校验的 Canvas Agent 转发请求；如果网页渠道没有填写 API Key，则回退读取 `canvas-agent/.env.local`。ComfyUI 工作流配置仍只从 `canvas-agent/.env.local` 读取。可复制 `.env.example` 为 `.env.local` 后按需填写。
+
+画布图片配置节点还可以选择 `general-image-generation` 或 `aigc-cli` 图片 Skill。Skill 任务通过 `/generation/skill/image/tasks` 在本机 Agent 中执行：通用 Skill 使用本机安装的 `generate_image.py`，AIGC CLI 使用其 `run.ps1`/`run.sh` 启动器；结果保存到 `~/.infinite-canvas/generated/<task-id>` 并以图片数据返回画布。Skill 失败不会伪造成功，节点开启回退时才会明确降级到网页 API。
+
+Skill 默认从用户级环境变量读取 `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL`，也可在 `canvas-agent/.env.local` 中提供；脚本覆盖变量 `CANVAS_AGENT_GENERAL_IMAGE_SCRIPT`、`CANVAS_AGENT_AIGC_SKILL_DIR` 和 `CANVAS_AGENT_PYTHON` 仅用于本机安装路径不同的情况，不会把密钥写入仓库或日志。
 
 ComfyUI 第一版只执行一个 API 格式导出的 workflow JSON：设置 `COMFYUI_WORKFLOW_PATH`、提示词节点 ID 及输入字段后，Agent 会向本机 `COMFYUI_BASE_URL` 的 `/prompt`、`/history` 和 `/view` 发请求。未安装 ComfyUI、未配置 workflow，或在 `COMFYUI_ALLOW_SIMULATION=true` 时服务不可用，都会返回明确标记的模拟图片，不会访问外部服务；当前不支持参考图输入。
 
@@ -119,6 +123,7 @@ default_tools_approval_mode = "approve"
 - `canvas_get_selection`
 - `canvas_export_snapshot`
 - `canvas_apply_ops`
+- `canvas_create_local_image_nodes`
 - `canvas_create_text_node`
 - `canvas_create_image_prompt_flow`
 

@@ -107,6 +107,10 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             size: input.size,
             quality: input.quality,
             count: input.count,
+            textCount: mode === "text" ? input.count : undefined,
+            imageCount: mode === "image" ? input.count : undefined,
+            videoCount: mode === "video" ? input.count : undefined,
+            audioCount: mode === "audio" ? input.count : undefined,
             seconds: input.seconds,
             vquality: input.vquality,
             generateAudio: input.generateAudio,
@@ -115,6 +119,10 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             audioFormat: input.audioFormat,
             audioSpeed: input.audioSpeed,
             audioInstructions: input.audioInstructions,
+            imageExecutor: input.imageExecutor,
+            skillName: input.imageExecutor === "general-image-generation" || input.imageExecutor === "aigc-cli" ? input.imageExecutor : undefined,
+            skillModel: input.skillModel,
+            fallbackToApi: input.fallbackToApi,
         }),
     };
 }
@@ -125,18 +133,24 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
     const prompt = String(input.prompt || "");
     const x = Number(input.x ?? nextCanvasX(state));
     const y = Number(input.y ?? 0);
-    const textId = `text-${crypto.randomUUID()}`;
     const configId = `config-${crypto.randomUUID()}`;
     const referenceNodeIds = Array.isArray(input.referenceNodeIds) ? input.referenceNodeIds.filter((id): id is string => typeof id === "string") : [];
-    const tokens = [`@[node:${textId}]`, ...referenceNodeIds.map((id) => `@[node:${id}]`)];
+    const promptNodeIds = referencedPromptNodeIds(prompt);
+    const reuseReferences = promptNodeIds.length > 0 && promptNodeIds.every((id) => referenceNodeIds.includes(id)) && prompt.replace(/@\[node:[^\]]+\]/g, "").trim() === "";
+    const textId = reuseReferences ? undefined : `text-${crypto.randomUUID()}`;
+    const tokens = reuseReferences ? prompt : [ `@[node:${textId}]`, ...referenceNodeIds.map((id) => `@[node:${id}]`) ].join("\n");
     return [
-        textNodeOp({ id: textId, text: prompt, title: String(input.title || "提示词") }, x, y),
-        configNodeOp(configId, { ...input, prompt: tokens.join("\n") }, x + 420, y),
-        { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
+        ...(textId ? [textNodeOp({ id: textId, text: prompt, title: String(input.title || "提示词") }, x, y)] : []),
+        configNodeOp(configId, { ...input, prompt: tokens }, x + 420, y),
+        ...(textId ? [{ type: "connect_nodes", fromNodeId: textId, toNodeId: configId }] : []),
         ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes", fromNodeId, toNodeId: configId })),
         { type: "select_nodes", ids: [configId] },
-        ...(input.autoRun ? [runGenerationOp(configId, mode, tokens.join("\n"))] : []),
+        ...(input.autoRun ? [runGenerationOp(configId, mode, tokens)] : []),
     ];
+}
+
+function referencedPromptNodeIds(prompt: string) {
+    return Array.from(prompt.matchAll(/@\[node:([^\]]+)\]/g), (match) => match[1]);
 }
 
 /** 创建触发节点生成的画布操作。 */
